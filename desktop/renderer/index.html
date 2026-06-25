@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <title>OutboundOS</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M3 7l9 6 9-6" />
+          </svg>
+          <span>OutboundOS</span>
+        </div>
+        <nav class="nav">
+          <button class="tab active" data-view="run">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <span>Run</span>
+          </button>
+          <button class="tab" data-view="results">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
+            <span>Results</span>
+          </button>
+          <button class="tab" data-view="sent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+            <span>Sent</span>
+          </button>
+          <button class="tab" data-view="settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            <span>Settings</span>
+          </button>
+        </nav>
+        <div class="sidebar-foot">Runs locally · Groq-powered</div>
+      </aside>
+
+      <!-- CONTENT -->
+      <main class="content">
+        <!-- RUN -->
+        <section id="view-run" class="view active">
+          <header class="page-head">
+            <div>
+              <h1>Run</h1>
+              <p class="page-sub">Find businesses and draft personalized emails.</p>
+            </div>
+          </header>
+
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-title">
+                <span class="card-ico">🔍</span>
+                <div><h2>Search Google Maps</h2><p class="muted">We scrape each business, read its reviews, and write the email.</p></div>
+              </div>
+              <div class="row">
+                <label>Search
+                  <input id="query" type="text" placeholder="e.g. law firms in Austin TX" />
+                </label>
+                <label class="narrow">How many
+                  <input id="count" type="number" value="10" min="1" max="60" />
+                </label>
+              </div>
+              <button id="runBtn" class="primary block">Scrape &amp; Generate</button>
+              <p id="runHint" class="hint"></p>
+            </div>
+
+            <div class="card">
+              <div class="card-title">
+                <span class="card-ico">📄</span>
+                <div><h2>Upload a CSV</h2><p class="muted">Columns: business name, address, website, decision-maker email.</p></div>
+              </div>
+              <label>Lead file
+                <span class="pickrow">
+                  <input id="csvPath" type="text" placeholder="No file chosen" readonly />
+                  <button id="pickCsv" class="ghost">Choose…</button>
+                </span>
+              </label>
+              <button id="runCsvBtn" class="primary block">Generate from CSV</button>
+              <p id="csvHint" class="hint"></p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title"><div><h2>Activity</h2></div></div>
+            <div id="progress" class="progress-log"><span class="muted">Idle — start a run above.</span></div>
+          </div>
+        </section>
+
+        <!-- RESULTS -->
+        <section id="view-results" class="view">
+          <header class="page-head">
+            <div>
+              <h1>Results</h1>
+              <p class="page-sub">Review drafts, then approve and send.</p>
+            </div>
+            <div class="page-actions">
+              <label class="inline-pick">Send from
+                <select id="sendFrom"></select>
+              </label>
+              <button id="sendApproved" class="primary">Send all approved</button>
+              <button id="openData" class="ghost">Open folder</button>
+              <button id="refreshRuns" class="ghost">Refresh</button>
+            </div>
+          </header>
+
+          <div class="split">
+            <div id="runList" class="run-list"><p class="muted pad">No runs yet.</p></div>
+            <div id="emailList" class="email-list"><p class="muted pad">Pick a run on the left.</p></div>
+          </div>
+        </section>
+
+        <!-- SENT -->
+        <section id="view-sent" class="view">
+          <header class="page-head">
+            <div>
+              <h1>Sent</h1>
+              <p class="page-sub">Every email you've sent, grouped by mailbox.</p>
+            </div>
+            <div class="page-actions">
+              <button id="refreshSent" class="ghost">Refresh</button>
+            </div>
+          </header>
+          <div class="card">
+            <div id="sentTableWrap"><p class="muted">Nothing sent yet.</p></div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="view-settings" class="view">
+          <header class="page-head">
+            <div>
+              <h1>Settings</h1>
+              <p class="page-sub">Your details, AI key, and sending mailboxes.</p>
+            </div>
+          </header>
+
+          <div class="card">
+            <div class="card-title"><div><h2>You &amp; AI</h2><p class="muted">Used to personalize and write the emails.</p></div></div>
+            <label>Groq API key
+              <input id="s_groq" type="password" placeholder="gsk_..." />
+              <span class="fieldhint">Required — the only paid service. Get a free key at console.groq.com → API Keys.</span>
+            </label>
+            <div class="row">
+              <label>Your name
+                <input id="s_name" type="text" placeholder="Ayaz" />
+              </label>
+              <label>Company
+                <input id="s_company" type="text" placeholder="KodWorks" />
+              </label>
+            </div>
+            <label>Offer (what you help them with)
+              <textarea id="s_offer" rows="4" placeholder="We help businesses save time and money by automating the manual work that quietly loses them leads — missed calls, slow follow-ups, scheduling…"></textarea>
+              <span class="fieldhint">The fix the email offers — frame it around saving time and money. The AI tailors it per business. Restart the app to apply changes mid-session.</span>
+            </label>
+            <label>Data folder (leads, emails, browser profile)
+              <span class="pickrow">
+                <input id="s_dataDir" type="text" placeholder="F:\OutboundOS" />
+                <button id="pickDir" class="ghost">Browse…</button>
+              </span>
+            </label>
+          </div>
+
+          <div class="card">
+            <div class="card-title"><div><h2>Sending mailboxes</h2><p class="muted">Add one or more inboxes to send from. Use dedicated sending inboxes; Gmail/Outlook need an App Password (2-step verification on).</p></div></div>
+            <div id="mailboxList"></div>
+            <button id="addMailbox" class="ghost">+ Add mailbox</button>
+            <label style="margin-top:16px">Footer address (optional, for compliance)
+              <input id="s_sigAddr" type="text" placeholder="123 Main St, City, Country" />
+            </label>
+            <div class="save-row">
+              <button id="saveSettings" class="primary">Save settings</button>
+              <span id="settingsHint" class="hint"></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

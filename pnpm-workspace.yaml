@@ -1,0 +1,5 @@
+packages:
+  - "backend"
+  - "desktop"
+  # "frontend" is intentionally parked (not built yet). Add it here when it's rebuilt
+  # against the backend API.

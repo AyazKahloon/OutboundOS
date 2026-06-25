@@ -1,0 +1,51 @@
+// Prisma schema for OutboundOS — Neon Postgres.
+// Run `pnpm db:generate` after edits, `pnpm db:push` to sync the database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Campaign {
+  id        String   @id @default(cuid())
+  name      String
+  status    String   @default("draft") // draft | running | paused | done
+  createdAt DateTime @default(now())
+  leads     Lead[]
+}
+
+model Lead {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+
+  // Raw data (from CSV upload)
+  fullName           String
+  email              String
+  title              String?
+  phone              String?
+  companyName        String
+  companyWebsite     String?
+  linkedinUrl        String? // personal LinkedIn
+  companyLinkedinUrl String?
+  location           String? // address / city / state
+
+  // Agent outputs
+  researchJson Json? // Agent 2 (researcher) output
+  emailDraft   String? // Agent 3 (writer) output
+  emailSubject String?
+
+  // Status: pending | researching | draft_ready | approved | sent | opened | replied
+  status String @default("pending")
+
+  approvedAt DateTime?
+  sentAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([campaignId])
+  @@index([status])
+}

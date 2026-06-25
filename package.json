@@ -1,0 +1,27 @@
+{
+  "name": "outboundos",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Multi-agent outbound marketing OS",
+  "scripts": {
+    "dev": "pnpm --filter @outboundos/backend dev",
+    "start": "pnpm --filter @outboundos/backend start",
+    "scrape-leads": "pnpm --filter @outboundos/backend scrape-leads",
+    "generate-emails": "pnpm --filter @outboundos/backend generate-emails",
+    "dry-run": "pnpm --filter @outboundos/backend dry-run",
+    "db:generate": "pnpm --filter @outboundos/backend db:generate",
+    "db:push": "pnpm --filter @outboundos/backend db:push",
+    "db:studio": "pnpm --filter @outboundos/backend db:studio",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "overrides": {
+      "ioredis": "5.11.1"
+    }
+  },
+  "packageManager": "pnpm@9.15.0"
+}

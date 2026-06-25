@@ -1,0 +1,44 @@
+{
+  "name": "@outboundos/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "scrape-leads": "tsx src/scripts/scrape-leads.ts",
+    "generate-emails": "tsx src/scripts/generate-emails.ts",
+    "dry-run": "tsx src/scripts/dry-run.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.18",
+    "@langchain/langgraph": "^0.2.19",
+    "@mozilla/readability": "^0.5.0",
+    "@prisma/client": "^5.22.0",
+    "bullmq": "^5.21.0",
+    "dotenv": "^16.4.5",
+    "groq-sdk": "^0.9.0",
+    "ioredis": "^5.4.1",
+    "jsdom": "^25.0.1",
+    "nodemailer": "^6.9.16",
+    "papaparse": "^5.4.1",
+    "playwright": "^1.49.1",
+    "resend": "^4.0.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^20.16.15",
+    "@types/nodemailer": "^6.4.17",
+    "@types/papaparse": "^5.3.15",
+    "@types/turndown": "^5.0.5",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

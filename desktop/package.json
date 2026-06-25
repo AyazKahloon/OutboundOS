@@ -1,0 +1,53 @@
+{
+  "name": "@outboundos/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OutboundOS desktop app",
+  "main": "main.js",
+  "author": "KodWorks",
+  "scripts": {
+    "start": "electron .",
+    "bundle": "node build.mjs",
+    "make": "node build.mjs && node pack.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "esbuild": "^0.24.0",
+    "electron": "^33.2.1"
+  },
+  "build": {
+    "appId": "com.kodworks.outboundos",
+    "productName": "OutboundOS",
+    "asar": false,
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+    "directories": {
+      "output": "F:/OutboundOS-installer"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "backend.cjs",
+      "xhr-sync-worker.js",
+      "renderer/**",
+      "assets/**",
+      "node_modules/playwright/**",
+      "node_modules/playwright-core/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "OutboundOS"
+    }
+  }
+}
