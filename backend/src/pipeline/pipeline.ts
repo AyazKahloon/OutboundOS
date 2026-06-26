@@ -17,6 +17,8 @@ export interface PipelineState {
 
   // Populated by the in-house crawler (replaces Firecrawl)
   siteMarkdown: string;
+  siteSignals?: string; // what the business appears to already have / lack online
+  category?: string; // business category/industry (from Google Maps), helps tailor the pitch
 
   // Populated by the in-house Google Maps reviews scraper
   reviews: GoogleReview[];

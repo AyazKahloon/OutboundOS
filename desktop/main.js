@@ -60,8 +60,8 @@ function getBackend() {
 
 // Known providers — pick one and we fill in the SMTP server automatically.
 const MAIL_PROVIDERS = {
-  gmail: { host: "smtp.gmail.com", port: 465, secure: true },
-  outlook: { host: "smtp.office365.com", port: 587, secure: false },
+  gmail: { host: "smtp.gmail.com", port: 465, secure: true, imap: "imap.gmail.com" },
+  outlook: { host: "smtp.office365.com", port: 587, secure: false, imap: "outlook.office365.com" },
 };
 
 // The user can configure several sending mailboxes. Returns the saved list (migrating an
@@ -97,8 +97,70 @@ function buildMailboxConfig(mb) {
     pass: mb.pass || "",
     fromName: mb.fromName || settings.senderName || "",
     fromEmail: email,
+    imapHost: preset ? preset.imap : mb.imapHost || "", // for reply detection
     signatureAddress: settings.signatureAddress || "",
   };
+}
+
+// ---- follow-up sequence helpers --------------------------------------------
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// After sending sequence step N, when is the next follow-up due? (null = sequence done)
+function nextFollowupAt(stepJustSent, gaps) {
+  const idx = stepJustSent - 1; // after step 1, use gaps[0]
+  return idx < gaps.length ? new Date(Date.now() + gaps[idx] * DAY_MS).toISOString() : null;
+}
+
+// Load every run with its emails (so we can scan/update the whole pipeline).
+async function loadAllRuns() {
+  const { store } = await getBackend();
+  const out = [];
+  for (const s of await store.listRuns()) {
+    const run = await store.getRun(s.id);
+    if (run && run.emails) out.push(run);
+  }
+  return out;
+}
+
+// Check inboxes for replies, mark replied leads, stop their sequences. Returns count.
+async function checkRepliesInternal(runs) {
+  const { mailer } = await getBackend();
+  const byMailbox = new Map(); // mailboxId -> [emails]
+  const index = new Map(); // emailId -> { run, em }
+  for (const run of runs) {
+    for (const em of run.emails) {
+      if ((em.status === "sent") && em.threadMessageId && em.email) {
+        const key = em.mailboxId || "_default";
+        if (!byMailbox.has(key)) byMailbox.set(key, []);
+        byMailbox.get(key).push(em);
+        index.set(em.id, { run, em });
+      }
+    }
+  }
+  const changed = new Set();
+  let replied = 0;
+  for (const [key, ems] of byMailbox) {
+    const mb = findMailbox(key === "_default" ? undefined : key);
+    if (!mb) continue;
+    const cfg = buildMailboxConfig(mb);
+    if (!cfg.imapHost || !cfg.pass) continue;
+    const threads = ems.map((em) => ({ leadId: em.id, messageId: em.threadMessageId, to: em.email }));
+    const since = ems.map((e) => e.sentAt).filter(Boolean).sort()[0];
+    const res = await mailer.checkReplies(cfg, threads, since);
+    for (const leadId of res.repliedLeadIds || []) {
+      const rec = index.get(leadId);
+      if (rec && rec.em.status !== "replied") {
+        rec.em.status = "replied";
+        rec.em.repliedAt = new Date().toISOString();
+        rec.em.nextFollowupAt = null;
+        changed.add(rec.run);
+        replied++;
+      }
+    }
+  }
+  const { store } = await getBackend();
+  for (const run of changed) await store.saveRun(run);
+  return replied;
 }
 
 function findMailbox(mailboxId) {
@@ -215,6 +277,21 @@ ipcMain.handle("runs:get", async (_e, id) => {
   return store.getRun(id);
 });
 
+ipcMain.handle("runs:delete", async (_e, id) => {
+  const { store } = await getBackend();
+  await store.deleteRun(id);
+  return { ok: true };
+});
+
+ipcMain.handle("email:delete", async (_e, { runId, emailId }) => {
+  const { store } = await getBackend();
+  const run = await store.getRun(runId);
+  if (!run || !run.emails) return { ok: false, error: "run not found" };
+  run.emails = run.emails.filter((e) => e.id !== emailId);
+  await store.saveRun(run);
+  return { ok: true };
+});
+
 ipcMain.handle("data:open", () => {
   shell.openPath(process.env.OUTBOUNDOS_DATA_DIR || DEFAULT_DATA_DIR);
 });
@@ -243,7 +320,7 @@ ipcMain.handle("email:setStatus", async (_e, { runId, emailId, status }) => {
 });
 
 ipcMain.handle("email:send", async (_e, { runId, emailId, mailboxId }) => {
-  const { store, mailer } = await getBackend();
+  const { store, mailer, service } = await getBackend();
   const mb = findMailbox(mailboxId);
   if (!mb) return { ok: false, error: "Add a mailbox in Settings first." };
   const cfg = buildMailboxConfig(mb);
@@ -257,6 +334,10 @@ ipcMain.handle("email:send", async (_e, { runId, emailId, mailboxId }) => {
   if (res.ok) {
     em.sentAt = new Date().toISOString();
     em.sentFrom = cfg.fromEmail;
+    em.mailboxId = mb.id;
+    em.threadMessageId = res.messageId;
+    em.sequenceStep = 1;
+    em.nextFollowupAt = nextFollowupAt(1, service.FOLLOWUP_GAP_DAYS);
   }
   em.error = res.ok ? undefined : res.error;
   await store.saveRun(run);
@@ -264,7 +345,7 @@ ipcMain.handle("email:send", async (_e, { runId, emailId, mailboxId }) => {
 });
 
 ipcMain.handle("email:sendApproved", async (_e, { runId, mailboxId }) => {
-  const { store, mailer } = await getBackend();
+  const { store, mailer, service } = await getBackend();
   const mb = findMailbox(mailboxId);
   if (!mb) return { ok: false, error: "Add a mailbox in Settings first." };
   const cfg = buildMailboxConfig(mb);
@@ -282,6 +363,10 @@ ipcMain.handle("email:sendApproved", async (_e, { runId, mailboxId }) => {
     if (res.ok) {
       em.sentAt = new Date().toISOString();
       em.sentFrom = cfg.fromEmail;
+      em.mailboxId = mb.id;
+      em.threadMessageId = res.messageId;
+      em.sequenceStep = 1;
+      em.nextFollowupAt = nextFollowupAt(1, service.FOLLOWUP_GAP_DAYS);
       sent++;
     } else {
       em.error = res.error;
@@ -292,6 +377,89 @@ ipcMain.handle("email:sendApproved", async (_e, { runId, mailboxId }) => {
     if (i < queue.length - 1) await new Promise((r) => setTimeout(r, 8000 + Math.floor(Math.random() * 7000)));
   }
   sendProgress({ phase: "done", message: `Sent ${sent}, failed ${failed}.` });
+  return { ok: true, sent, failed };
+});
+
+// ---- follow-up sequences ---------------------------------------------------
+
+// Counts for the banner (no IMAP, cheap).
+ipcMain.handle("followups:status", async () => {
+  const runs = await loadAllRuns();
+  const now = Date.now();
+  let due = 0;
+  let scheduled = 0;
+  let replied = 0;
+  for (const run of runs) {
+    for (const em of run.emails) {
+      if (em.status === "replied") replied++;
+      else if (em.status === "sent" && em.nextFollowupAt) {
+        if (new Date(em.nextFollowupAt).getTime() <= now) due++;
+        else scheduled++;
+      }
+    }
+  }
+  return { due, scheduled, replied };
+});
+
+// Check inboxes for replies and stop those sequences.
+ipcMain.handle("replies:check", async () => {
+  const runs = await loadAllRuns();
+  const replied = await checkRepliesInternal(runs);
+  return { ok: true, replied };
+});
+
+// Send every follow-up that is due. Checks replies first so we never follow up someone
+// who already answered. Throttled between sends.
+ipcMain.handle("followups:sendDue", async () => {
+  const { store, mailer, service } = await getBackend();
+  await checkRepliesInternal(await loadAllRuns());
+  const runs = await loadAllRuns();
+  const gaps = service.FOLLOWUP_GAP_DAYS;
+  const maxSteps = service.MAX_SEQUENCE_STEPS;
+  const now = Date.now();
+  let sent = 0;
+  let failed = 0;
+  for (const run of runs) {
+    let changed = false;
+    for (const em of run.emails) {
+      if (em.status !== "sent" || !em.nextFollowupAt || !em.email || !em.threadMessageId) continue;
+      if (new Date(em.nextFollowupAt).getTime() > now) continue;
+      const step = (em.sequenceStep || 1) + 1;
+      if (step > maxSteps) {
+        em.nextFollowupAt = null;
+        changed = true;
+        continue;
+      }
+      const mb = findMailbox(em.mailboxId);
+      if (!mb) continue;
+      const cfg = buildMailboxConfig(mb);
+      if (!mailer.isMailboxConfigured(cfg)) continue;
+      sendProgress({ phase: "email", message: `Follow-up ${step - 1} to ${em.email}…` });
+      const fu = await service.generateFollowup({
+        name: em.name,
+        contactName: em.contactName,
+        originalSubject: em.subject,
+        originalBody: em.body,
+        step,
+      });
+      if (fu.error) {
+        failed++;
+        continue;
+      }
+      const res = await mailer.sendEmail(cfg, { to: em.email, subject: fu.subject, body: fu.body, inReplyTo: em.threadMessageId, references: em.threadMessageId });
+      changed = true;
+      if (res.ok) {
+        em.sequenceStep = step;
+        em.nextFollowupAt = nextFollowupAt(step, gaps);
+        sent++;
+        await new Promise((r) => setTimeout(r, 8000 + Math.floor(Math.random() * 7000)));
+      } else {
+        failed++;
+      }
+    }
+    if (changed) await store.saveRun(run);
+  }
+  sendProgress({ phase: "done", message: `Follow-ups sent: ${sent}${failed ? `, failed ${failed}` : ""}.` });
   return { ok: true, sent, failed };
 });
 

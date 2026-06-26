@@ -9,7 +9,10 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
     tab.classList.add("active");
     $(`#view-${tab.dataset.view}`).classList.add("active");
-    if (tab.dataset.view === "results") loadRuns();
+    if (tab.dataset.view === "results") {
+      loadRuns();
+      refreshFollowupBanner();
+    }
     if (tab.dataset.view === "sent") loadSent();
   });
 });
@@ -107,8 +110,20 @@ async function loadRuns() {
     const item = document.createElement("div");
     item.className = "run-item";
     const date = new Date(r.createdAt).toLocaleString();
-    item.innerHTML = `<div class="q"></div><div class="meta">${r.leadCount} leads · ${r.emailCount} emails<br>${date}</div>`;
+    item.innerHTML =
+      `<div class="run-head"><div class="q"></div><button class="run-del" title="Delete this run">✕</button></div>` +
+      `<div class="meta">${r.leadCount} leads · ${r.emailCount} emails<br>${date}</div>`;
     item.querySelector(".q").textContent = r.query;
+    item.querySelector(".run-del").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete this run and its ${r.emailCount} emails? This can't be undone.`)) return;
+      await window.api.deleteRun(r.id);
+      if (currentRunId === r.id) {
+        currentRunId = null;
+        $("#emailList").innerHTML = '<p class="muted pad">Pick a run on the left.</p>';
+      }
+      loadRuns();
+    });
     item.addEventListener("click", () => {
       document.querySelectorAll(".run-item").forEach((i) => i.classList.remove("active"));
       item.classList.add("active");
@@ -161,7 +176,7 @@ async function showRun(id) {
   run.emails.forEach((em) => box.appendChild(emailCard(em)));
 }
 
-const STATUS_CLASS = { draft: "", approved: "ok", sent: "sent", failed: "neg" };
+const STATUS_CLASS = { draft: "", approved: "ok", sent: "sent", failed: "neg", replied: "replied" };
 
 function emailCard(em) {
   const card = document.createElement("div");
@@ -173,9 +188,18 @@ function emailCard(em) {
 
   // Generation failed (no email body produced).
   if (!em.subject && em.error) {
-    card.innerHTML = `<div class="name"></div><div class="sub"></div><div class="err">⚠️ ${escapeHtml(em.error)}</div>`;
+    card.innerHTML = `<div class="name"></div><div class="sub"></div><div class="err">⚠️ ${escapeHtml(em.error)}</div><div class="actions"></div>`;
     card.querySelector(".name").textContent = em.name;
     card.querySelector(".sub").innerHTML = sub + neg;
+    const del = document.createElement("button");
+    del.className = "ghost danger";
+    del.textContent = "Delete";
+    del.addEventListener("click", async () => {
+      if (!confirm("Delete this failed email?")) return;
+      await window.api.deleteEmail(currentRunId, em.id);
+      showRun(currentRunId);
+    });
+    card.querySelector(".actions").appendChild(del);
     return card;
   }
 
@@ -239,12 +263,28 @@ function emailCard(em) {
     });
   }
   if (status === "sent") {
-    const when = em.sentAt ? new Date(em.sentAt).toLocaleString() : "";
+    const when = em.sentAt ? new Date(em.sentAt).toLocaleDateString() : "";
+    const step = em.sequenceStep || 1;
+    let txt = `Sent ${when}`;
+    if (em.nextFollowupAt) txt += ` · step ${step}/4 · next follow-up ${new Date(em.nextFollowupAt).toLocaleDateString()}`;
+    else if (step >= 4) txt += " · sequence complete";
     const note = document.createElement("span");
     note.className = "muted";
-    note.textContent = `Sent ${when}`;
+    note.textContent = txt;
     actions.appendChild(note);
   }
+  if (status === "replied") {
+    const note = document.createElement("span");
+    note.className = "muted";
+    note.textContent = `Replied ${em.repliedAt ? new Date(em.repliedAt).toLocaleString() : ""} ✓ (follow-ups stopped)`;
+    actions.appendChild(note);
+  }
+
+  addBtn("Delete", "ghost danger", async () => {
+    if (!confirm(`Delete this email${em.email ? " to " + em.email : ""}? This can't be undone.`)) return;
+    await window.api.deleteEmail(currentRunId, em.id);
+    showRun(currentRunId);
+  });
   return card;
 }
 
@@ -265,6 +305,50 @@ $("#sendApproved").addEventListener("click", async () => {
   const res = await window.api.sendApproved(currentRunId, mbId);
   if (!res.ok) alert(res.error);
   showRun(currentRunId);
+  refreshFollowupBanner();
+});
+
+// ---- follow-ups + replies --------------------------------------------------
+async function refreshFollowupBanner() {
+  const s = await window.api.followupStatus();
+  const banner = $("#fuBanner");
+  if (!s || (!s.due && !s.scheduled && !s.replied)) {
+    banner.style.display = "none";
+    return;
+  }
+  const bits = [];
+  if (s.due) bits.push(`${s.due} follow-up${s.due === 1 ? "" : "s"} due now`);
+  if (s.scheduled) bits.push(`${s.scheduled} scheduled`);
+  if (s.replied) bits.push(`${s.replied} replied`);
+  banner.textContent = bits.join("  ·  ");
+  banner.style.display = "block";
+}
+
+$("#checkReplies").addEventListener("click", async () => {
+  const btn = $("#checkReplies");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  const res = await window.api.checkReplies();
+  btn.disabled = false;
+  btn.textContent = "Check replies";
+  await refreshFollowupBanner();
+  if (currentRunId) showRun(currentRunId);
+  if (res.ok) alert(`${res.replied} new repl${res.replied === 1 ? "y" : "ies"} found.`);
+  else alert(res.error || "Could not check replies. Make sure your mailbox has IMAP enabled.");
+});
+
+$("#sendFollowups").addEventListener("click", async () => {
+  const btn = $("#sendFollowups");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  progressEl.innerHTML = "";
+  logLine("Checking replies, then sending due follow-ups…");
+  const res = await window.api.sendDueFollowups();
+  btn.disabled = false;
+  btn.textContent = "Send due follow-ups";
+  await refreshFollowupBanner();
+  if (currentRunId) showRun(currentRunId);
+  if (!res.ok) alert(res.error);
 });
 
 // ---- sent list -------------------------------------------------------------

@@ -101,10 +101,13 @@
                 <select id="sendFrom"></select>
               </label>
               <button id="sendApproved" class="primary">Send all approved</button>
+              <button id="checkReplies" class="ghost">Check replies</button>
+              <button id="sendFollowups" class="ghost">Send due follow-ups</button>
               <button id="openData" class="ghost">Open folder</button>
               <button id="refreshRuns" class="ghost">Refresh</button>
             </div>
           </header>
+          <div id="fuBanner" class="fu-banner" style="display:none"></div>
 
           <div class="split">
             <div id="runList" class="run-list"><p class="muted pad">No runs yet.</p></div>
@@ -151,9 +154,9 @@
                 <input id="s_company" type="text" placeholder="KodWorks" />
               </label>
             </div>
-            <label>Offer (what you help them with)
-              <textarea id="s_offer" rows="4" placeholder="We help businesses save time and money by automating the manual work that quietly loses them leads — missed calls, slow follow-ups, scheduling…"></textarea>
-              <span class="fieldhint">The fix the email offers — frame it around saving time and money. The AI tailors it per business. Restart the app to apply changes mid-session.</span>
+            <label>Your services (the menu the AI picks from)
+              <textarea id="s_offer" rows="5" placeholder="e.g. KodWorks: custom software (web and mobile apps and internal tools), AI chatbots, WhatsApp bots, voice agents that answer and make calls and push leads into your CRM, document and workflow automation, and help getting more Google reviews."></textarea>
+              <span class="fieldhint">List everything you offer. For each business the AI picks the single best fit, matched to what their website lacks, their reviews, and their industry. Restart the app to apply changes mid-session.</span>
             </label>
             <label>Data folder (leads, emails, browser profile)
               <span class="pickrow">

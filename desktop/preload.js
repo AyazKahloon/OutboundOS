@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("api", {
   runFromCsv: (filePath) => ipcRenderer.invoke("run:fromCsv", filePath),
   listRuns: () => ipcRenderer.invoke("runs:list"),
   getRun: (id) => ipcRenderer.invoke("runs:get", id),
+  deleteRun: (id) => ipcRenderer.invoke("runs:delete", id),
+  deleteEmail: (runId, emailId) => ipcRenderer.invoke("email:delete", { runId, emailId }),
   listSent: () => ipcRenderer.invoke("sent:list"),
   openDataDir: () => ipcRenderer.invoke("data:open"),
   onProgress: (cb) => ipcRenderer.on("progress", (_e, data) => cb(data)),
@@ -19,4 +21,8 @@ contextBridge.exposeInMainWorld("api", {
   setEmailStatus: (runId, emailId, status) => ipcRenderer.invoke("email:setStatus", { runId, emailId, status }),
   sendEmail: (runId, emailId, mailboxId) => ipcRenderer.invoke("email:send", { runId, emailId, mailboxId }),
   sendApproved: (runId, mailboxId) => ipcRenderer.invoke("email:sendApproved", { runId, mailboxId }),
+  // follow-ups + replies
+  followupStatus: () => ipcRenderer.invoke("followups:status"),
+  sendDueFollowups: () => ipcRenderer.invoke("followups:sendDue"),
+  checkReplies: () => ipcRenderer.invoke("replies:check"),
 });

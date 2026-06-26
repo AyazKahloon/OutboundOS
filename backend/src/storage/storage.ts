@@ -24,4 +24,5 @@ export interface LeadStore {
   saveRun(run: RunData): Promise<void>;
   listRuns(): Promise<RunSummary[]>;
   getRun(id: string): Promise<RunData | null>;
+  deleteRun(id: string): Promise<void>;
 }

@@ -13,9 +13,7 @@ import Papa from "papaparse";
 import { DATA_DIR } from "../lib/paths.js";
 import { crawlSite } from "../scrapers/crawler.js";
 import { scrapeGoogleReviews, type GoogleReview, type PlaceLead } from "../scrapers/gmaps-reviews.js";
-import { researcherAgent } from "../agents/researcher.agent.js";
-import { reviewsAnalystAgent } from "../agents/reviews-analyst.agent.js";
-import { writerAgent } from "../agents/writer.agent.js";
+import { composerAgent } from "../agents/composer.agent.js";
 import type { PipelineState } from "../pipeline/pipeline.js";
 import { closeBrowser } from "../lib/browser.js";
 import { sender, offer } from "../config.js";
@@ -86,11 +84,14 @@ async function generate(lead: Lead): Promise<Generated> {
     error: null,
   };
 
-  // 1) In-house crawl (best-effort).
+  // 1) In-house crawl (best-effort) — also harvest a contact email from the site.
+  let crawledEmail = "";
   if (state.companyWebsite) {
     try {
       const crawl = await crawlSite(state.companyWebsite);
       state.siteMarkdown = crawl.combinedMarkdown;
+      state.siteSignals = crawl.siteSignals;
+      crawledEmail = crawl.email;
     } catch (err) {
       console.warn(`  · crawl failed (${lead.companyName}): ${(err as Error).message}`);
     }
@@ -111,15 +112,14 @@ async function generate(lead: Lead): Promise<Generated> {
     }
   }
 
-  // 3) Analysts → writer.
-  Object.assign(state, await researcherAgent(state));
-  Object.assign(state, await reviewsAnalystAgent(state));
-  Object.assign(state, await writerAgent(state));
+  // 3) One Groq call writes the email (was 3: research + analyze + write).
+  Object.assign(state, await composerAgent(state));
 
   const rating = state.reviewsMeta?.averageRating;
   const total = state.reviewsMeta?.totalReviews;
   return {
     ...lead,
+    email: lead.email || crawledEmail,
     subject: state.emailSubject ?? "",
     body: state.emailDraft ?? "",
     reviewSummary: state.reviews.length ? `${rating ?? "?"}★ from ${total ?? state.reviews.length} reviews` : "no reviews",
@@ -220,7 +220,7 @@ async function main() {
     ``,
     `Source: \`${inputPath}\``,
     `Sender: ${sender.name}, ${sender.company}`,
-    `Pipeline: in-house crawl + Google reviews → research → review-analysis → writer (Groq only)`,
+    `Pipeline: in-house crawl + Google reviews → single AI call per business (Groq only)`,
     ``,
     `---`,
     ``,

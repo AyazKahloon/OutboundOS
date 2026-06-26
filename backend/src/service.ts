@@ -7,13 +7,29 @@ import { searchPlaces } from "./scrapers/gmaps-search.js";
 import { scrapePlace, scrapeGoogleReviews, type PlaceLead } from "./scrapers/gmaps-reviews.js";
 import { crawlSite } from "./scrapers/crawler.js";
 import { parseLeadCsv, type ManualLead } from "./lib/csv-leads.js";
-import { researcherAgent } from "./agents/researcher.agent.js";
-import { reviewsAnalystAgent } from "./agents/reviews-analyst.agent.js";
-import { writerAgent } from "./agents/writer.agent.js";
+import { composerAgent } from "./agents/composer.agent.js";
 import type { PipelineState } from "./pipeline/pipeline.js";
 import { sender, offer } from "./config.js";
 
-export type EmailStatus = "draft" | "approved" | "sent" | "failed";
+// How many businesses to process in parallel (crawl + LLM overlap; Maps scraping stays
+// serialized internally). Tune via OUTBOUNDOS_CONCURRENCY.
+const CONCURRENCY = Math.max(1, Number(process.env.OUTBOUNDOS_CONCURRENCY) || 3);
+
+// Run items through `fn` with a bounded number running at once.
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!, i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+export type EmailStatus = "draft" | "approved" | "sent" | "failed" | "replied";
 
 export interface GeneratedEmail {
   id: string;
@@ -33,7 +49,17 @@ export interface GeneratedEmail {
   status: EmailStatus;
   sentAt?: string;
   error?: string;
+  // ---- follow-up sequence state (set after the first email is sent) ----
+  threadMessageId?: string; // Message-ID of the initial email (for threading + reply match)
+  mailboxId?: string; // which mailbox sent it (follow-ups use the same one)
+  sequenceStep?: number; // emails sent so far in the thread (1 = initial, 2 = first follow-up…)
+  nextFollowupAt?: string | null; // ISO time the next follow-up is due (null = sequence finished/stopped)
+  repliedAt?: string;
 }
+
+// Follow-up cadence: gaps (in days) AFTER each send. 3 follow-ups → 4 total touches.
+export const FOLLOWUP_GAP_DAYS = [3, 4, 5];
+export const MAX_SEQUENCE_STEPS = FOLLOWUP_GAP_DAYS.length + 1; // initial + follow-ups
 
 export interface ProgressEvent {
   phase: "search" | "place" | "email" | "done" | "error";
@@ -82,6 +108,7 @@ export async function generateEmail(
     companyName: lead.name,
     companyWebsite: lead.website,
     address: lead.address,
+    category: lead.category,
     decisionMakerName: extra.contactName ?? "",
     siteMarkdown: "",
     reviews: lead.reviews,
@@ -93,17 +120,21 @@ export async function generateEmail(
     error: null,
   };
 
+  // Crawl the site; also harvest a contact email from it (search mode has none from Maps).
+  let crawledEmail = "";
   if (lead.website) {
     try {
-      state.siteMarkdown = (await crawlSite(lead.website)).combinedMarkdown;
+      const crawl = await crawlSite(lead.website);
+      state.siteMarkdown = crawl.combinedMarkdown;
+      state.siteSignals = crawl.siteSignals;
+      crawledEmail = crawl.email;
     } catch {
       /* crawl is best-effort */
     }
   }
 
-  Object.assign(state, await researcherAgent(state));
-  Object.assign(state, await reviewsAnalystAgent(state));
-  Object.assign(state, await writerAgent(state));
+  // One Groq call writes the whole email (was 3 calls: research + analyze + write).
+  Object.assign(state, await composerAgent(state));
 
   return {
     id: randomUUID(),
@@ -111,7 +142,8 @@ export async function generateEmail(
     website: lead.website,
     address: lead.address,
     phone: lead.phone,
-    email: extra.email ?? "",
+    // CSV-provided email wins; otherwise use the one harvested from the website.
+    email: extra.email || crawledEmail || "",
     contactName: extra.contactName ?? "",
     category: lead.category,
     rating: lead.rating,
@@ -125,22 +157,20 @@ export async function generateEmail(
   };
 }
 
-// Generate emails for many leads, reporting progress per business.
+// Generate emails for many leads — processed in parallel (crawl + LLM overlap).
 export async function generateEmails(leads: PlaceLead[], onProgress?: ProgressFn): Promise<GeneratedEmail[]> {
-  const out: GeneratedEmail[] = [];
-  let i = 0;
-  for (const lead of leads) {
-    i++;
+  let done = 0;
+  return mapPool(leads, CONCURRENCY, async (lead) => {
     const email = await generateEmail(lead);
-    out.push(email);
+    done++;
     onProgress?.({
       phase: "email",
       message: `${lead.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`,
-      current: i,
+      current: done,
       total: leads.length,
     });
-  }
-  return out;
+    return email;
+  });
 }
 
 // Convenience: scrape then generate in one call.
@@ -168,13 +198,11 @@ export async function processManualLeads(
     throw new Error("Set your name, company and offer in Settings before generating emails.");
   }
 
+  // Processed in parallel. The Maps review scrape inside is serialized by its own lock, so
+  // while one business's reviews are being fetched, others crawl + call the LLM.
+  let done = 0;
   const leads: PlaceLead[] = [];
-  const emails: GeneratedEmail[] = [];
-  let i = 0;
-  for (const row of rows) {
-    i++;
-    onProgress?.({ phase: "place", message: `${row.name} — fetching reviews…`, current: i, total: rows.length });
-
+  const emails = await mapPool(rows, CONCURRENCY, async (row) => {
     // Reviews come from Maps (by name + address); details (website) come from the CSV.
     let reviews: PlaceLead["reviews"] = [];
     let rating: number | null = null;
@@ -202,14 +230,15 @@ export async function processManualLeads(
     leads.push(lead);
 
     const email = await generateEmail(lead, { email: row.email, contactName: row.contactName });
-    emails.push(email);
+    done++;
     onProgress?.({
       phase: "email",
       message: `${row.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`,
-      current: i,
+      current: done,
       total: rows.length,
     });
-  }
+    return email;
+  });
 
   onProgress?.({ phase: "done", message: `Done — ${emails.filter((e) => !e.error).length}/${emails.length} emails ready.` });
   return { leads, emails };

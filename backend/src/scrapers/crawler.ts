@@ -38,6 +38,87 @@ export interface CrawlResult {
   homepageUrl: string;
   pages: CrawledPage[];
   combinedMarkdown: string;
+  email: string; // best contact email found on the site ("" if none)
+  siteSignals: string; // what the business appears to already have / lack online
+}
+
+// ---- contact-email extraction ----------------------------------------------
+// Search mode has no email from Google Maps, so we harvest one from the site itself.
+const JUNK_EMAIL_DOMAINS = [
+  "example.com", "example.org", "sentry.io", "wixpress.com", "wix.com", "godaddy.com",
+  "squarespace.com", "domain.com", "email.com", "yourdomain.com", "your-email.com",
+  "company.com", "mysite.com", "test.com", "sentry-next.wixpress.com",
+];
+const ROLE_PREFIXES = ["info", "contact", "hello", "hi", "office", "admin", "sales", "team", "support", "enquiries", "inquiries", "reception", "mail"];
+
+interface EmailHit {
+  mailto: boolean;
+  sameDomain: boolean;
+}
+
+function isUsableEmail(e: string): boolean {
+  if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e)) return false;
+  if (/\.(png|jpe?g|gif|svg|webp|css|js|woff2?)$/i.test(e)) return false; // asset@2x.png etc.
+  if (/@\d+x\./.test(e)) return false;
+  const domain = e.split("@")[1]!;
+  return !JUNK_EMAIL_DOMAINS.some((d) => domain === d || domain.endsWith("." + d));
+}
+
+function collectEmails(html: string, siteHost: string, into: Map<string, EmailHit>): void {
+  const add = (raw: string, mailto: boolean) => {
+    const e = decodeURIComponent(raw).split("?")[0]!.trim().toLowerCase();
+    if (!isUsableEmail(e)) return;
+    const domain = e.split("@")[1]!;
+    const sameDomain = domain === siteHost || domain.endsWith("." + siteHost);
+    const prev = into.get(e);
+    into.set(e, { mailto: mailto || Boolean(prev?.mailto), sameDomain });
+  };
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+)/gi)) add(m[1]!, true);
+  for (const m of html.matchAll(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)) add(m[0]!, false);
+}
+
+// Prefer the business's own domain, then a real mailto link, then a role inbox (info@ …).
+function pickBestEmail(hits: Map<string, EmailHit>): string {
+  let best = "";
+  let bestScore = -1;
+  for (const [e, h] of hits) {
+    let score = (h.sameDomain ? 4 : 0) + (h.mailto ? 2 : 0) + (ROLE_PREFIXES.includes(e.split("@")[0]!) ? 1 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = e;
+    }
+  }
+  return best;
+}
+
+// ---- "what they already have / lack online" detection ----------------------
+// Lets the email pitch the RIGHT thing and not pitch something they already have.
+// Vendor-name patterns are used where possible to avoid false positives.
+const SIGNALS: [string, string, RegExp][] = [
+  ["booking", "online booking/scheduling", /calendly|acuity|setmore|simplybook|opentable|resy|squareup\.com\/book|book\s*(now|online|an?\s*appointment)|schedule\s*an?\s*appointment/i],
+  ["chat", "a live chat or chatbot", /intercom|drift\.com|tawk\.to|crisp\.chat|tidio|zendesk|livechatinc|hubspot|fb-customerchat|customerchat|botpress/i],
+  ["whatsapp", "WhatsApp contact", /wa\.me|api\.whatsapp\.com|whatsapp/i],
+  ["ecommerce", "online ordering/store", /add[\s-]?to[\s-]?cart|shopify|woocommerce|snipcart|\/checkout|order\s*online/i],
+  ["app", "a mobile app", /apps\.apple\.com|play\.google\.com\/store/i],
+];
+const CONTACT_FORM = /<form|contact\s*us|get\s*in\s*touch|enquir|inquiry/i;
+
+function detectSignals(html: string, flags: Set<string>): void {
+  for (const [key, , re] of SIGNALS) if (re.test(html)) flags.add(key);
+  if (CONTACT_FORM.test(html)) flags.add("contactform");
+}
+
+function summarizeSignals(flags: Set<string>): string {
+  const has: string[] = [];
+  const missing: string[] = [];
+  for (const [key, label] of SIGNALS) (flags.has(key) ? has : missing).push(label);
+  const parts: string[] = [];
+  if (has.length) parts.push(`Appears to already have: ${has.join(", ")}.`);
+  if (missing.length) parts.push(`Not found on the site: ${missing.join(", ")}.`);
+  if (flags.has("contactform") && !flags.has("chat") && !flags.has("whatsapp") && !flags.has("booking")) {
+    parts.push("The only obvious way to reach them online is a basic contact form.");
+  }
+  return parts.join(" ");
 }
 
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -89,6 +170,14 @@ function pickKeyLinks(base: string, links: { href: string; text: string }[]): st
 export async function crawlSite(websiteUrl: string): Promise<CrawlResult> {
   const ctx = await newContext();
   const pages: CrawledPage[] = [];
+  const emailHits = new Map<string, EmailHit>();
+  const signalFlags = new Set<string>();
+  let siteHost = "";
+  try {
+    siteHost = new URL(websiteUrl).host.replace(/^www\./, "");
+  } catch {
+    /* leave blank */
+  }
   try {
     const page = await ctx.newPage();
     // Skip images/media to crawl faster — we only want text.
@@ -102,6 +191,8 @@ export async function crawlSite(websiteUrl: string): Promise<CrawlResult> {
     await page.goto(websiteUrl, { waitUntil: "domcontentloaded", timeout: PER_PAGE_TIMEOUT });
     await humanDelay();
     const homeHtml = await page.content();
+    collectEmails(homeHtml, siteHost, emailHits);
+    detectSignals(homeHtml, signalFlags);
     const home = htmlToMarkdown(homeHtml, websiteUrl);
     pages.push({ url: websiteUrl, title: home.title, markdown: truncate(home.markdown, MAX_CHARS_PER_PAGE) });
 
@@ -117,6 +208,8 @@ export async function crawlSite(websiteUrl: string): Promise<CrawlResult> {
         await page.goto(link, { waitUntil: "domcontentloaded", timeout: PER_PAGE_TIMEOUT });
         await humanDelay();
         const html = await page.content();
+        collectEmails(html, siteHost, emailHits);
+        detectSignals(html, signalFlags);
         const { title, markdown } = htmlToMarkdown(html, link);
         if (markdown.trim()) pages.push({ url: link, title, markdown: truncate(markdown, MAX_CHARS_PER_PAGE) });
       } catch (err) {
@@ -137,5 +230,11 @@ export async function crawlSite(websiteUrl: string): Promise<CrawlResult> {
     total += chunk.length;
   }
 
-  return { homepageUrl: websiteUrl, pages, combinedMarkdown: truncate(parts.join("\n\n---\n\n"), MAX_TOTAL_CHARS) };
+  return {
+    homepageUrl: websiteUrl,
+    pages,
+    combinedMarkdown: truncate(parts.join("\n\n---\n\n"), MAX_TOTAL_CHARS),
+    email: pickBestEmail(emailHits),
+    siteSignals: summarizeSignals(signalFlags),
+  };
 }

@@ -1,6 +1,6 @@
 // Disk-backed LeadStore: one JSON file per run under <DATA_DIR>/runs/. Also writes a
 // human-friendly emails.md + leads.csv per run for easy reading/exporting.
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { LeadStore, RunData, RunSummary } from "./storage.js";
 
@@ -47,5 +47,9 @@ export class DiskStore implements LeadStore {
     } catch {
       return null;
     }
+  }
+
+  async deleteRun(id: string): Promise<void> {
+    rmSync(join(this.runsDir(), `${id}.json`), { force: true });
   }
 }
