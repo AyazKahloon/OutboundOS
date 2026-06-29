@@ -5,13 +5,44 @@
 //     packaged app can require them without relying on pnpm's symlink layout.
 import { build } from "esbuild";
 import { createRequire } from "node:module";
-import { cpSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { cpSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DESKTOP = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(DESKTOP, "..");
 const BACKEND = join(ROOT, "backend");
+
+// 0) Make a Windows .ico from assets/icon.png so the packaged .exe / taskbar shows an icon.
+// @electron/packager (rcedit) needs a real .ico; we only keep a 256x256 PNG in the repo.
+// A modern .ico can embed a PNG directly (Vista+), so we wrap the PNG bytes in an ICONDIR.
+// (icon.png MUST be 256x256 for the 0,0 width/height sentinel below to be correct.)
+function pngToIco(png) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // type: 1 = icon
+  header.writeUInt16LE(1, 4); // image count
+  const entry = Buffer.alloc(16);
+  entry.writeUInt8(0, 0); // width  (0 = 256)
+  entry.writeUInt8(0, 1); // height (0 = 256)
+  entry.writeUInt8(0, 2); // palette count
+  entry.writeUInt8(0, 3); // reserved
+  entry.writeUInt16LE(1, 4); // color planes
+  entry.writeUInt16LE(32, 6); // bits per pixel
+  entry.writeUInt32LE(png.length, 8); // image size
+  entry.writeUInt32LE(22, 12); // offset (6 + 16)
+  return Buffer.concat([header, entry, png]);
+}
+const icoPath = join(DESKTOP, "assets", "icon.ico");
+writeFileSync(icoPath, pngToIco(readFileSync(join(DESKTOP, "assets", "icon.png"))));
+console.log("Wrote assets/icon.ico");
+
+// Stamp the build so the app can show users which version they're running (verifies "latest").
+writeFileSync(
+  join(DESKTOP, "build-info.json"),
+  JSON.stringify({ version: "1.0.0", builtAt: new Date().toISOString() }, null, 2)
+);
+console.log("Wrote build-info.json");
 
 // 1) bundle
 console.log("Bundling backend → backend.cjs …");

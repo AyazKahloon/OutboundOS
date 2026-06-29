@@ -178,7 +178,7 @@ function createWindow() {
     minHeight: 560,
     backgroundColor: "#0f1115",
     title: "OutboundOS",
-    icon: path.join(__dirname, "assets", "icon.png"),
+    icon: path.join(__dirname, "assets", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -196,6 +196,17 @@ function sendProgress(e) {
 }
 
 ipcMain.handle("settings:get", () => ({ ...settings, _defaultDataDir: DEFAULT_DATA_DIR }));
+
+// Build/version info so the user can confirm they're running the latest packaged build.
+ipcMain.handle("app:info", () => {
+  let info = { version: app.getVersion(), builtAt: null };
+  try {
+    info = { ...info, ...JSON.parse(fs.readFileSync(path.join(__dirname, "build-info.json"), "utf8")) };
+  } catch {
+    /* build-info.json is written at build time; missing in raw dev runs */
+  }
+  return info;
+});
 
 ipcMain.handle("settings:save", (_e, incoming) => {
   settings = { ...settings, ...incoming };

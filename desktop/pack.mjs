@@ -30,7 +30,7 @@ const paths = await packager({
   appVersion: "1.0.0",
   asar: false,
   prune: false,
-  icon: join(DESKTOP, "assets", "icon.png"),
+  icon: join(DESKTOP, "assets", "icon.ico"),
   ignore,
 });
 

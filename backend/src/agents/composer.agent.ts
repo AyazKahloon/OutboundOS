@@ -35,16 +35,23 @@ Pick the ONE KodWorks solution that fits best and describe it specifically for t
 STRUCTURE (the "body" field must follow this exactly):
 - Line 1: a greeting using the recipient's first name only ("Hi Sara,"). If no name is given,
   greet warmly ("Hi there,"). Never invent a name.
-- Sentence 1: a specific, genuine compliment grounded in a real review or a true website detail.
-- Sentence 2: the one concrete gap or opportunity you found, framed tactfully as something that
-  is quietly costing them time, money or leads. Never insult them. Never state something as a
-  fact unless the signals, reviews or website support it.
+- Sentence 1: a specific, genuine compliment about their work or business, written as your OWN
+  observation. Do not attribute it to reviews or reviewers.
+- Sentence 2: the one concrete shortcoming or gap you noticed, written as YOUR own observation,
+  framed tactfully as something that is quietly costing them time, money or leads. Never insult
+  them. Never state something as a fact unless the website signals or what you genuinely found
+  support it.
 - Sentence 3: the matching KodWorks solution, phrased for their specific business and industry,
   and how it saves them time and money.
 - Then exactly ONE low friction question ending with "?".
 - Then a blank line, then "Best," on its own line, then the sender's name on its own line.
 
 RULES:
+- NEVER mention reviews, ratings, stars, or reviewers, and NEVER imply you read or heard
+  anything about them from somewhere. Do not write "your reviews", "a reviewer", "customers
+  mention", "people say", "I read", "I read about", "I heard", "I have heard", "I came across",
+  "I saw that", or quote a review. The reviews are PRIVATE background only. State the compliment
+  and the shortcoming as your OWN direct observations of their business and website.
 - 70 to 120 words. Plain text only. No markdown, no bullets, no buzzwords, no hype.
 - NEVER use dashes of any kind (em dash, en dash, or a hyphen used as a pause). Use commas and
   periods instead. Dashes make it look AI written.
@@ -85,10 +92,10 @@ ${state.siteSignals || "(nothing detected)"}
 WEBSITE CONTENT:
 ${site ? truncate(site, 3500) : "(no website content)"}
 
-POSITIVE REVIEWS (compliment them on one of these):
+WHAT THEY DO WELL (private background to inform your compliment, never mention or quote reviews):
 ${positives.join("\n") || "(none)"}
 
-CRITICAL REVIEWS (a source of pain you can address):
+PROBLEMS WE PICKED UP ON (private background, frame as your own observation, never mention reviews):
 ${negatives.join("\n") || "(none)"}`;
 }
 

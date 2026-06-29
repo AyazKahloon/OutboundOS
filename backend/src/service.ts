@@ -99,10 +99,12 @@ export async function scrapeLeads(query: string, count: number, onProgress?: Pro
 
 // Crawl one business's site, analyze its reviews, and write a personalized email.
 // `extra` carries CSV-supplied fields (decision-maker email / name) through to the output.
+// Returns null when we could NOT find a contact email for the business — without an inbox to
+// send to, the lead is useless to us, so we skip it (and don't spend a Groq call on it).
 export async function generateEmail(
   lead: PlaceLead,
   extra: { email?: string; contactName?: string } = {}
-): Promise<GeneratedEmail> {
+): Promise<GeneratedEmail | null> {
   const state: PipelineState = {
     leadId: "app",
     companyName: lead.name,
@@ -133,6 +135,11 @@ export async function generateEmail(
     }
   }
 
+  // CSV-provided email wins; otherwise use the one harvested from the website.
+  const email = (extra.email || crawledEmail || "").trim();
+  // No contact email → skip this business entirely (no recipient = no use). Saves the Groq call.
+  if (!email) return null;
+
   // One Groq call writes the whole email (was 3 calls: research + analyze + write).
   Object.assign(state, await composerAgent(state));
 
@@ -142,8 +149,7 @@ export async function generateEmail(
     website: lead.website,
     address: lead.address,
     phone: lead.phone,
-    // CSV-provided email wins; otherwise use the one harvested from the website.
-    email: extra.email || crawledEmail || "",
+    email,
     contactName: extra.contactName ?? "",
     category: lead.category,
     rating: lead.rating,
@@ -158,19 +164,23 @@ export async function generateEmail(
 }
 
 // Generate emails for many leads — processed in parallel (crawl + LLM overlap).
+// Leads with no contact email are skipped (not returned), since we can't send to them.
 export async function generateEmails(leads: PlaceLead[], onProgress?: ProgressFn): Promise<GeneratedEmail[]> {
   let done = 0;
-  return mapPool(leads, CONCURRENCY, async (lead) => {
+  const results = await mapPool(leads, CONCURRENCY, async (lead) => {
     const email = await generateEmail(lead);
     done++;
     onProgress?.({
       phase: "email",
-      message: `${lead.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`,
+      message: email
+        ? `${lead.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`
+        : `${lead.name} — skipped (no contact email found)`,
       current: done,
       total: leads.length,
     });
     return email;
   });
+  return results.filter((e): e is GeneratedEmail => e !== null);
 }
 
 // Convenience: scrape then generate in one call.
@@ -184,7 +194,11 @@ export async function scrapeAndGenerate(
   }
   const leads = await scrapeLeads(query, count, onProgress);
   const emails = await generateEmails(leads, onProgress);
-  onProgress?.({ phase: "done", message: `Done — ${emails.filter((e) => !e.error).length}/${emails.length} emails ready.` });
+  const skipped = leads.length - emails.length;
+  onProgress?.({
+    phase: "done",
+    message: `Done — ${emails.filter((e) => !e.error).length} emails ready${skipped > 0 ? ` (${skipped} skipped, no contact email)` : ""}.`,
+  });
   return { leads, emails };
 }
 
@@ -233,15 +247,22 @@ export async function processManualLeads(
     done++;
     onProgress?.({
       phase: "email",
-      message: `${row.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`,
+      message: email
+        ? `${row.name}${email.error ? ` — failed: ${email.error}` : " — email ready"}`
+        : `${row.name} — skipped (no contact email found)`,
       current: done,
       total: rows.length,
     });
     return email;
   });
 
-  onProgress?.({ phase: "done", message: `Done — ${emails.filter((e) => !e.error).length}/${emails.length} emails ready.` });
-  return { leads, emails };
+  const kept = emails.filter((e): e is GeneratedEmail => e !== null);
+  const skipped = emails.length - kept.length;
+  onProgress?.({
+    phase: "done",
+    message: `Done — ${kept.filter((e) => !e.error).length} emails ready${skipped > 0 ? ` (${skipped} skipped, no contact email)` : ""}.`,
+  });
+  return { leads, emails: kept };
 }
 
 // Read a CSV file from disk and run the manual-lead pipeline.

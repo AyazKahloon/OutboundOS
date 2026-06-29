@@ -515,3 +515,18 @@ function escapeHtml(s) {
 }
 
 loadSettings();
+
+// Show the build stamp in the sidebar so the user can confirm they're on the latest build.
+(async () => {
+  try {
+    const info = await window.api.appInfo();
+    const el = document.getElementById("buildInfo");
+    if (!el) return;
+    const when = info.builtAt
+      ? new Date(info.builtAt).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : null;
+    el.textContent = `v${info.version}${when ? ` · built ${when}` : ""}`;
+  } catch {
+    /* non-fatal */
+  }
+})();

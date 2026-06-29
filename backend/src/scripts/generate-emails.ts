@@ -67,7 +67,7 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: number)
   return results;
 }
 
-async function generate(lead: Lead): Promise<Generated> {
+async function generate(lead: Lead): Promise<Generated | null> {
   const state: PipelineState = {
     leadId: "batch",
     companyName: lead.companyName,
@@ -112,6 +112,10 @@ async function generate(lead: Lead): Promise<Generated> {
     }
   }
 
+  // No contact email → skip this business (no recipient = no use). Saves the Groq call.
+  const email = (lead.email || crawledEmail || "").trim();
+  if (!email) return null;
+
   // 3) One Groq call writes the email (was 3: research + analyze + write).
   Object.assign(state, await composerAgent(state));
 
@@ -119,7 +123,7 @@ async function generate(lead: Lead): Promise<Generated> {
   const total = state.reviewsMeta?.totalReviews;
   return {
     ...lead,
-    email: lead.email || crawledEmail,
+    email,
     subject: state.emailSubject ?? "",
     body: state.emailDraft ?? "",
     reviewSummary: state.reviews.length ? `${rating ?? "?"}★ from ${total ?? state.reviews.length} reviews` : "no reviews",
@@ -202,15 +206,19 @@ async function main() {
   );
 
   let done = 0;
-  const results = await mapPool(leads, concurrency, async (lead) => {
+  const raw = await mapPool(leads, concurrency, async (lead) => {
     const g = await generate(lead);
     done++;
     console.log(
-      `  [${done}/${leads.length}] ${g.error ? "✗" : "✓"} ${lead.companyName} ` +
-        `— ${g.reviewCount} reviews${g.error ? ` (${g.error})` : ""}`
+      g
+        ? `  [${done}/${leads.length}] ${g.error ? "✗" : "✓"} ${lead.companyName} — ${g.reviewCount} reviews${g.error ? ` (${g.error})` : ""}`
+        : `  [${done}/${leads.length}] ⊘ ${lead.companyName} — skipped (no contact email found)`
     );
     return g;
   });
+  const results = raw.filter((g): g is NonNullable<typeof g> => g !== null);
+  const skipped = raw.length - results.length;
+  if (skipped > 0) console.log(`\n${skipped} business(es) skipped — no contact email found.`);
 
   await closeBrowser();
 
